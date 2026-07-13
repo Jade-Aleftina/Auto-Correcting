@@ -15,13 +15,23 @@ const elements = {
   questionCount: document.querySelector('#questionCount'),
   answerKey: document.querySelector('#answerKey'),
   saveImages: document.querySelector('#saveImages'),
-  imageInput: document.querySelector('#imageInput'),
+  cameraInput: document.querySelector('#cameraInput'),
+  fileInput: document.querySelector('#fileInput'),
   mainCanvas: document.querySelector('#mainCanvas'),
   templateCanvas: document.querySelector('#templateCanvas'),
   blurWarning: document.querySelector('#blurWarning'),
   brightness: document.querySelector('#brightness'),
   contrast: document.querySelector('#contrast'),
   threshold: document.querySelector('#threshold'),
+  activeQuestion: document.querySelector('#activeQuestion'),
+  singleModeButton: document.querySelector('#singleModeButton'),
+  batchModeButton: document.querySelector('#batchModeButton'),
+  batchPanel: document.querySelector('#batchPanel'),
+  batchStart: document.querySelector('#batchStart'),
+  batchCount: document.querySelector('#batchCount'),
+  batchDirection: document.querySelector('#batchDirection'),
+  batchGap: document.querySelector('#batchGap'),
+  boxProgress: document.querySelector('#boxProgress'),
   boxList: document.querySelector('#boxList'),
   ocrProgress: document.querySelector('#ocrProgress'),
   ocrProgressText: document.querySelector('#ocrProgressText'),
@@ -65,6 +75,7 @@ async function init() {
   await loadTests();
   await restoreDraft();
   renderAnswerKey();
+  renderQuestionSelectors();
   showStep('setup');
 }
 
@@ -82,13 +93,30 @@ function bindEvents() {
   document.querySelector('#newTestButton').addEventListener('click', newTest);
   document.querySelector('#saveTestButton').addEventListener('click', saveTest);
   elements.testSelect.addEventListener('change', selectTest);
-  elements.questionCount.addEventListener('change', renderAnswerKey);
-  elements.imageInput.addEventListener('change', handleImageInput);
+  elements.questionCount.addEventListener('change', () => {
+    renderAnswerKey();
+    renderQuestionSelectors();
+  });
+  elements.cameraInput.addEventListener('change', handleImageInput);
+  elements.fileInput.addEventListener('change', handleImageInput);
   document.querySelector('#rotateLeftButton').addEventListener('click', () => rotateImage('left'));
   document.querySelector('#rotateRightButton').addEventListener('click', () => rotateImage('right'));
   [elements.brightness, elements.contrast, elements.threshold].forEach(input => {
     input.addEventListener('input', refreshAdjustedImage);
   });
+
+  elements.activeQuestion.addEventListener('change', () => {
+    state.templateEditor.setActiveNumber(Number(elements.activeQuestion.value));
+    elements.batchStart.value = elements.activeQuestion.value || '1';
+    syncBatchOptionsFromUi();
+  });
+  elements.singleModeButton.addEventListener('click', () => setTemplateMode('single'));
+  elements.batchModeButton.addEventListener('click', () => setTemplateMode('batch'));
+  [elements.batchStart, elements.batchCount, elements.batchDirection, elements.batchGap].forEach(input => {
+    input.addEventListener('input', syncBatchOptionsFromUi);
+    input.addEventListener('change', syncBatchOptionsFromUi);
+  });
+
   document.querySelector('#loadTemplateButton').addEventListener('click', loadTemplateForCurrentTest);
   document.querySelector('#clearBoxesButton').addEventListener('click', () => state.templateEditor.clear());
   document.querySelector('#saveTemplateButton').addEventListener('click', saveTemplate);
@@ -142,7 +170,6 @@ function newTest() {
   test.name = `新しいテスト ${state.tests.length + 1}`;
   state.currentTest = test;
   fillTestForm(test);
-  renderAnswerKey();
   showMessage('新しいテスト設定を入力してください。');
 }
 
@@ -152,6 +179,7 @@ function fillTestForm(test) {
   elements.questionCount.value = test.questionCount || 20;
   elements.saveImages.checked = Boolean(test.saveImages);
   renderAnswerKey();
+  renderQuestionSelectors();
 }
 
 function selectTest() {
@@ -209,6 +237,22 @@ function renderAnswerKey() {
   });
 }
 
+function renderQuestionSelectors() {
+  const count = Number(elements.questionCount.value || 20);
+  const options = [];
+  for (let number = 1; number <= count; number += 1) {
+    options.push(`<option value="${number}">問${number}</option>`);
+  }
+  elements.activeQuestion.innerHTML = options.join('');
+  elements.activeQuestion.value = Math.min(Number(elements.activeQuestion.value || 1), count);
+  elements.batchStart.max = String(count);
+  elements.batchCount.max = String(count);
+  state.templateEditor.setQuestionCount(count);
+  state.templateEditor.setActiveNumber(Number(elements.activeQuestion.value || 1));
+  syncBatchOptionsFromUi();
+  renderBoxList();
+}
+
 async function saveTest() {
   const test = readTestForm();
   await putItem('tests', test);
@@ -228,9 +272,11 @@ async function handleImageInput(event) {
     refreshAdjustedImage();
     state.templateEditor.setImage(state.adjustedCanvas);
     await saveDraft();
-    showMessage('答案画像を読み込みました。');
+    showMessage('答案画像を読み込みました。撮影済み画像でもこのまま使えます。', 'ok');
   } catch (error) {
     showMessage(error.message, 'error');
+  } finally {
+    event.target.value = '';
   }
 }
 
@@ -263,10 +309,29 @@ function getImageSettings() {
   };
 }
 
+function setTemplateMode(mode) {
+  const isBatch = mode === 'batch';
+  state.templateEditor.setMode(isBatch ? 'batch' : 'single');
+  elements.singleModeButton.classList.toggle('is-selected', !isBatch);
+  elements.batchModeButton.classList.toggle('is-selected', isBatch);
+  elements.batchPanel.classList.toggle('hidden', !isBatch);
+  syncBatchOptionsFromUi();
+}
+
+function syncBatchOptionsFromUi() {
+  state.templateEditor.setBatchOptions({
+    start: Number(elements.batchStart.value || 1),
+    count: Number(elements.batchCount.value || 1),
+    direction: elements.batchDirection.value,
+    gap: Number(elements.batchGap.value || 0)
+  });
+}
+
 async function saveTemplate() {
   const test = readTestForm();
-  if (!state.boxes.length) {
-    showMessage('回答欄を少なくとも1つ指定してください。', 'error');
+  const missing = getMissingBoxNumbers(test);
+  if (missing.length) {
+    showMessage(`未指定の回答欄があります: ${missing.join(', ')}`, 'error');
     return;
   }
   await putItem('templates', {
@@ -285,7 +350,7 @@ async function loadTemplateForCurrentTest() {
   const template = await getItem('templates', test.id);
   if (template?.boxes?.length) {
     state.templateEditor.setBoxes(template.boxes);
-    showMessage('保存済みの回答欄位置を表示しました。');
+    showMessage('保存済みの回答欄位置を表示しました。必要なら各問題を選んで上書きできます。', 'ok');
   } else {
     showMessage('このテストの保存済み回答欄位置はありません。');
   }
@@ -294,17 +359,52 @@ async function loadTemplateForCurrentTest() {
 function renderBoxList() {
   const count = Number(elements.questionCount.value || 20);
   const found = new Set(state.boxes.map(box => box.number));
+  const missing = [];
   const rows = [];
   for (let number = 1; number <= count; number += 1) {
-    rows.push(`<div class="box-row"><strong>問${number}</strong><span>${found.has(number) ? '指定済み' : '未指定'}</span><button class="secondary" type="button" data-remove-box="${number}">削除</button></div>`);
+    const isFound = found.has(number);
+    if (!isFound) missing.push(number);
+    rows.push(`
+      <div class="box-row ${isFound ? 'is-done' : ''}">
+        <strong>問${number}</strong>
+        <span>${isFound ? '指定済み' : '未指定'}</span>
+        <div class="box-actions">
+          <button class="secondary" type="button" data-select-box="${number}">選択</button>
+          <button class="secondary" type="button" data-remove-box="${number}">削除</button>
+        </div>
+      </div>
+    `);
   }
   elements.boxList.innerHTML = rows.join('');
-  elements.boxList.querySelectorAll('[data-remove-box]').forEach(button => {
+  elements.boxProgress.textContent = missing.length
+    ? `指定済み ${count - missing.length}/${count}。未指定: ${missing.join(', ')}`
+    : `すべての回答欄を指定済みです。`;
+  elements.boxProgress.className = missing.length ? 'message warn' : 'message ok';
+
+  elements.boxList.querySelectorAll('[data-select-box]').forEach(button => {
     button.addEventListener('click', () => {
-      const number = Number(button.dataset.removeBox);
-      state.templateEditor.setBoxes(state.boxes.filter(box => box.number !== number));
+      const number = Number(button.dataset.selectBox);
+      elements.activeQuestion.value = String(number);
+      elements.batchStart.value = String(number);
+      state.templateEditor.setActiveNumber(number);
+      syncBatchOptionsFromUi();
+      showMessage(`問${number}を選択しました。画像上で囲むと上書きできます。`);
     });
   });
+  elements.boxList.querySelectorAll('[data-remove-box]').forEach(button => {
+    button.addEventListener('click', () => {
+      state.templateEditor.removeBox(Number(button.dataset.removeBox));
+    });
+  });
+}
+
+function getMissingBoxNumbers(test) {
+  const found = new Set(state.boxes.map(box => box.number));
+  const missing = [];
+  for (let number = 1; number <= test.questionCount; number += 1) {
+    if (!found.has(number)) missing.push(number);
+  }
+  return missing;
 }
 
 async function runOcr() {
@@ -317,8 +417,9 @@ async function runOcr() {
       showMessage('先に答案画像を選択してください。', 'error');
       return;
     }
-    if (state.boxes.length < test.questionCount) {
-      showMessage('未指定の回答欄があります。必要な問題を指定してください。', 'error');
+    const missing = getMissingBoxNumbers(test);
+    if (missing.length) {
+      showMessage(`未指定の回答欄があります: ${missing.join(', ')}`, 'error');
       return;
     }
 
@@ -331,7 +432,7 @@ async function runOcr() {
       elements.ocrProgressText.textContent = `OCR準備中: ${progress.status} ${progress.progress}%`;
     });
 
-    const boxes = state.boxes.slice().sort((a, b) => a.number - b.number);
+    const boxes = state.boxes.slice().filter(box => box.number <= test.questionCount).sort((a, b) => a.number - b.number);
     for (let index = 0; index < boxes.length; index += 1) {
       const box = boxes[index];
       const crop = cropByRatio(state.adjustedCanvas, box);
@@ -513,6 +614,7 @@ async function saveDraft() {
     id: 'current',
     step: document.querySelector('.wizard-panel.is-active')?.id || 'setup',
     testId: state.currentTest?.id || '',
+    boxes: state.boxes,
     ocrItems: state.ocrItems,
     finalAnswers: state.finalAnswers,
     savedAt: new Date().toISOString()
@@ -525,14 +627,21 @@ async function restoreDraft() {
   if (!draft) return;
   state.ocrItems = draft.ocrItems || [];
   state.finalAnswers = draft.finalAnswers || {};
+  if (draft.boxes?.length) {
+    state.templateEditor.setBoxes(draft.boxes);
+  }
   if (draft.ocrItems?.length) {
-    showMessage('前回の途中状態を復元しました。画像は保存していないため、必要に応じて再選択してください。');
+    showMessage('前回の途中状態を復元しました。画像は必要に応じて再選択してください。');
   }
 }
 
 function showStep(stepId) {
   elements.panels.forEach(panel => panel.classList.toggle('is-active', panel.id === stepId));
   elements.steps.forEach(step => step.classList.toggle('is-active', step.dataset.stepTarget === stepId));
+  if (stepId === 'template') {
+    renderQuestionSelectors();
+    if (state.adjustedCanvas.width) state.templateEditor.setImage(state.adjustedCanvas);
+  }
   if (stepId === 'history') renderHistory();
   saveDraft();
   window.scrollTo({ top: 0, behavior: 'smooth' });

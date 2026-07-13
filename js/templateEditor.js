@@ -5,8 +5,11 @@ export class TemplateEditor {
     this.imageCanvas = null;
     this.boxes = [];
     this.activeNumber = 1;
+    this.mode = 'single';
+    this.batchOptions = { start: 1, count: 5, direction: 'vertical', gap: 8 };
     this.dragStart = null;
     this.previewBox = null;
+    this.questionCount = 20;
     this.onChange = () => {};
     this.bindEvents();
   }
@@ -19,19 +22,48 @@ export class TemplateEditor {
   }
 
   setQuestionCount(count) {
-    this.activeNumber = Math.min(this.activeNumber, Number(count || 1));
+    this.questionCount = Number(count || 1);
+    this.activeNumber = clampNumber(this.activeNumber, 1, this.questionCount);
+    this.batchOptions.start = clampNumber(this.batchOptions.start, 1, this.questionCount);
+    this.redraw();
+  }
+
+  setActiveNumber(number) {
+    this.activeNumber = clampNumber(Number(number || 1), 1, this.questionCount);
+    this.redraw();
+  }
+
+  setMode(mode) {
+    this.mode = mode === 'batch' ? 'batch' : 'single';
+    this.redraw();
+  }
+
+  setBatchOptions(options) {
+    this.batchOptions = {
+      start: clampNumber(Number(options.start || 1), 1, this.questionCount),
+      count: Math.max(1, Number(options.count || 1)),
+      direction: options.direction === 'horizontal' ? 'horizontal' : 'vertical',
+      gap: Math.max(0, Number(options.gap || 0))
+    };
+    this.redraw();
   }
 
   setBoxes(boxes) {
-    this.boxes = (boxes || []).map(box => ({ ...box }));
+    this.boxes = (boxes || []).map(box => ({ ...box })).sort((a, b) => a.number - b.number);
     this.redraw();
-    this.onChange(this.boxes);
+    this.onChange(this.getBoxes());
   }
 
   clear() {
     this.boxes = [];
     this.redraw();
-    this.onChange(this.boxes);
+    this.onChange(this.getBoxes());
+  }
+
+  removeBox(number) {
+    this.boxes = this.boxes.filter(box => box.number !== number);
+    this.redraw();
+    this.onChange(this.getBoxes());
   }
 
   getBoxes() {
@@ -56,30 +88,60 @@ export class TemplateEditor {
 
     this.canvas.addEventListener('pointerup', event => {
       if (!this.dragStart || !this.previewBox) return;
-      const box = this.previewBox;
+      const pixelBox = this.previewBox;
       this.dragStart = null;
       this.previewBox = null;
       this.canvas.releasePointerCapture(event.pointerId);
 
-      if (box.width < 8 || box.height < 8) {
+      if (pixelBox.width < 8 || pixelBox.height < 8) {
         this.redraw();
         return;
       }
 
-      const ratioBox = {
-        number: this.activeNumber,
-        x: box.x / this.canvas.width,
-        y: box.y / this.canvas.height,
-        width: box.width / this.canvas.width,
-        height: box.height / this.canvas.height
-      };
-
-      this.boxes = this.boxes.filter(item => item.number !== this.activeNumber).concat(ratioBox);
+      const newBoxes = this.mode === 'batch'
+        ? this.createBatchBoxes(pixelBox)
+        : [this.pixelToRatioBox(pixelBox, this.activeNumber)];
+      const replaceNumbers = new Set(newBoxes.map(box => box.number));
+      this.boxes = this.boxes.filter(box => !replaceNumbers.has(box.number)).concat(newBoxes);
       this.boxes.sort((a, b) => a.number - b.number);
-      this.activeNumber += 1;
+      if (this.mode === 'single') {
+        this.activeNumber = clampNumber(this.activeNumber + 1, 1, this.questionCount);
+      }
       this.redraw();
-      this.onChange(this.boxes);
+      this.onChange(this.getBoxes());
     });
+  }
+
+  createBatchBoxes(pixelBox) {
+    const boxes = [];
+    const start = this.batchOptions.start;
+    const total = Math.min(this.batchOptions.count, this.questionCount - start + 1);
+    const stepX = this.batchOptions.direction === 'horizontal' ? pixelBox.width + this.batchOptions.gap : 0;
+    const stepY = this.batchOptions.direction === 'vertical' ? pixelBox.height + this.batchOptions.gap : 0;
+
+    for (let index = 0; index < total; index += 1) {
+      const number = start + index;
+      const nextPixelBox = {
+        x: pixelBox.x + stepX * index,
+        y: pixelBox.y + stepY * index,
+        width: pixelBox.width,
+        height: pixelBox.height
+      };
+      if (nextPixelBox.x + nextPixelBox.width <= this.canvas.width && nextPixelBox.y + nextPixelBox.height <= this.canvas.height) {
+        boxes.push(this.pixelToRatioBox(nextPixelBox, number));
+      }
+    }
+    return boxes;
+  }
+
+  pixelToRatioBox(pixelBox, number) {
+    return {
+      number,
+      x: pixelBox.x / this.canvas.width,
+      y: pixelBox.y / this.canvas.height,
+      width: pixelBox.width / this.canvas.width,
+      height: pixelBox.height / this.canvas.height
+    };
   }
 
   redraw() {
@@ -89,11 +151,15 @@ export class TemplateEditor {
     }
 
     this.boxes.forEach(box => {
-      this.drawBox(ratioToPixelBox(box, this.canvas), '#176c5d', String(box.number));
+      const isActive = box.number === this.activeNumber;
+      this.drawBox(ratioToPixelBox(box, this.canvas), isActive ? '#b42318' : '#176c5d', `問${box.number}`);
     });
 
     if (this.previewBox) {
-      this.drawBox(this.previewBox, '#b42318', String(this.activeNumber));
+      const label = this.mode === 'batch'
+        ? `問${this.batchOptions.start}〜`
+        : `問${this.activeNumber}`;
+      this.drawBox(this.previewBox, '#365c96', label);
     }
   }
 
@@ -101,12 +167,12 @@ export class TemplateEditor {
     this.context.save();
     this.context.strokeStyle = color;
     this.context.lineWidth = Math.max(3, this.canvas.width / 360);
-    this.context.fillStyle = 'rgba(255,255,255,.82)';
+    this.context.fillStyle = 'rgba(255,255,255,.86)';
     this.context.strokeRect(box.x, box.y, box.width, box.height);
-    this.context.fillRect(box.x, Math.max(0, box.y - 28), 46, 26);
+    this.context.fillRect(box.x, Math.max(0, box.y - 30), Math.max(58, label.length * 18), 28);
     this.context.fillStyle = color;
-    this.context.font = `${Math.max(18, this.canvas.width / 40)}px sans-serif`;
-    this.context.fillText(label, box.x + 8, Math.max(20, box.y - 8));
+    this.context.font = `${Math.max(18, this.canvas.width / 42)}px sans-serif`;
+    this.context.fillText(label, box.x + 8, Math.max(22, box.y - 9));
     this.context.restore();
   }
 
@@ -135,4 +201,8 @@ function normalizeBox(start, end) {
     width: Math.abs(end.x - start.x),
     height: Math.abs(end.y - start.y)
   };
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }

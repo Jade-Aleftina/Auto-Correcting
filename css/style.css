@@ -253,6 +253,13 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   grid-template-columns: repeat(2, 1fr);
 }
 
+.image-pickers {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .guide {
   padding: 12px;
   border: 1px solid var(--line);
@@ -292,6 +299,76 @@ canvas {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 12px;
+}
+
+.template-tools {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.tool-panel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.tool-panel h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.segmented button {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.segmented button.is-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mini-grid label {
+  margin: 0;
+}
+
+.box-row {
+  grid-template-columns: 54px 1fr 152px;
+}
+
+.box-row.is-done {
+  border-color: #b9dec5;
+  background: #f0fbf3;
+}
+
+.box-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.box-actions button {
+  min-height: 40px;
+  padding: 8px;
+  font-size: 13px;
 }
 
 .control-grid label,
@@ -382,6 +459,8 @@ progress {
 
 @media (min-width: 720px) {
   .steps { grid-template-columns: repeat(6, 1fr); }
+  .image-pickers { grid-template-columns: 1fr 1fr; }
+  .template-tools { grid-template-columns: 1fr 1.4fr; }
   .crop-grid { grid-template-columns: repeat(4, 1fr); }
   .review-list { grid-template-columns: repeat(2, 1fr); }
   .actions.compact { grid-template-columns: repeat(4, 1fr); }
