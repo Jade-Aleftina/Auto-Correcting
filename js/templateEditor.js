@@ -5,11 +5,11 @@ export class TemplateEditor {
     this.imageCanvas = null;
     this.boxes = [];
     this.activeNumber = 1;
-    this.mode = 'single';
-    this.batchOptions = { start: 1, count: 5, direction: 'vertical', gap: 8 };
+    this.mode = 'area';
+    this.questionCount = 20;
+    this.areaOptions = { start: 1, count: 20, columns: 1, order: 'column', padding: 10 };
     this.dragStart = null;
     this.previewBox = null;
-    this.questionCount = 20;
     this.onChange = () => {};
     this.bindEvents();
   }
@@ -24,7 +24,7 @@ export class TemplateEditor {
   setQuestionCount(count) {
     this.questionCount = Number(count || 1);
     this.activeNumber = clampNumber(this.activeNumber, 1, this.questionCount);
-    this.batchOptions.start = clampNumber(this.batchOptions.start, 1, this.questionCount);
+    this.areaOptions.count = Math.min(this.areaOptions.count, this.questionCount);
     this.redraw();
   }
 
@@ -34,16 +34,17 @@ export class TemplateEditor {
   }
 
   setMode(mode) {
-    this.mode = mode === 'batch' ? 'batch' : 'single';
+    this.mode = mode === 'single' ? 'single' : 'area';
     this.redraw();
   }
 
-  setBatchOptions(options) {
-    this.batchOptions = {
+  setAreaOptions(options) {
+    this.areaOptions = {
       start: clampNumber(Number(options.start || 1), 1, this.questionCount),
-      count: Math.max(1, Number(options.count || 1)),
-      direction: options.direction === 'horizontal' ? 'horizontal' : 'vertical',
-      gap: Math.max(0, Number(options.gap || 0))
+      count: Math.max(1, Math.min(Number(options.count || this.questionCount), this.questionCount)),
+      columns: Math.max(1, Math.min(Number(options.columns || 1), 6)),
+      order: options.order === 'row' ? 'row' : 'column',
+      padding: Math.max(0, Math.min(Number(options.padding || 0), 40))
     };
     this.redraw();
   }
@@ -81,8 +82,7 @@ export class TemplateEditor {
 
     this.canvas.addEventListener('pointermove', event => {
       if (!this.dragStart) return;
-      const point = this.getPoint(event);
-      this.previewBox = normalizeBox(this.dragStart, point);
+      this.previewBox = normalizeBox(this.dragStart, this.getPoint(event));
       this.redraw();
     });
 
@@ -98,38 +98,38 @@ export class TemplateEditor {
         return;
       }
 
-      const newBoxes = this.mode === 'batch'
-        ? this.createBatchBoxes(pixelBox)
+      const newBoxes = this.mode === 'area'
+        ? this.createAreaBoxes(pixelBox)
         : [this.pixelToRatioBox(pixelBox, this.activeNumber)];
       const replaceNumbers = new Set(newBoxes.map(box => box.number));
       this.boxes = this.boxes.filter(box => !replaceNumbers.has(box.number)).concat(newBoxes);
       this.boxes.sort((a, b) => a.number - b.number);
-      if (this.mode === 'single') {
-        this.activeNumber = clampNumber(this.activeNumber + 1, 1, this.questionCount);
-      }
       this.redraw();
       this.onChange(this.getBoxes());
     });
   }
 
-  createBatchBoxes(pixelBox) {
+  createAreaBoxes(pixelBox) {
     const boxes = [];
-    const start = this.batchOptions.start;
-    const total = Math.min(this.batchOptions.count, this.questionCount - start + 1);
-    const stepX = this.batchOptions.direction === 'horizontal' ? pixelBox.width + this.batchOptions.gap : 0;
-    const stepY = this.batchOptions.direction === 'vertical' ? pixelBox.height + this.batchOptions.gap : 0;
+    const { start, count, columns, order, padding } = this.areaOptions;
+    const total = Math.min(count, this.questionCount - start + 1);
+    const rows = Math.ceil(total / columns);
+    const cellWidth = pixelBox.width / columns;
+    const cellHeight = pixelBox.height / rows;
+    const padX = cellWidth * (padding / 100);
+    const padY = cellHeight * (padding / 100);
 
     for (let index = 0; index < total; index += 1) {
+      const row = order === 'row' ? Math.floor(index / columns) : index % rows;
+      const col = order === 'row' ? index % columns : Math.floor(index / rows);
       const number = start + index;
-      const nextPixelBox = {
-        x: pixelBox.x + stepX * index,
-        y: pixelBox.y + stepY * index,
-        width: pixelBox.width,
-        height: pixelBox.height
+      const cell = {
+        x: pixelBox.x + col * cellWidth + padX,
+        y: pixelBox.y + row * cellHeight + padY,
+        width: Math.max(8, cellWidth - padX * 2),
+        height: Math.max(8, cellHeight - padY * 2)
       };
-      if (nextPixelBox.x + nextPixelBox.width <= this.canvas.width && nextPixelBox.y + nextPixelBox.height <= this.canvas.height) {
-        boxes.push(this.pixelToRatioBox(nextPixelBox, number));
-      }
+      boxes.push(this.pixelToRatioBox(cell, number));
     }
     return boxes;
   }
@@ -146,9 +146,7 @@ export class TemplateEditor {
 
   redraw() {
     this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    if (this.imageCanvas) {
-      this.context.drawImage(this.imageCanvas, 0, 0);
-    }
+    if (this.imageCanvas) this.context.drawImage(this.imageCanvas, 0, 0);
 
     this.boxes.forEach(box => {
       const isActive = box.number === this.activeNumber;
@@ -156,8 +154,8 @@ export class TemplateEditor {
     });
 
     if (this.previewBox) {
-      const label = this.mode === 'batch'
-        ? `問${this.batchOptions.start}〜`
+      const label = this.mode === 'area'
+        ? `問${this.areaOptions.start}から自動分割`
         : `問${this.activeNumber}`;
       this.drawBox(this.previewBox, '#365c96', label);
     }
@@ -169,7 +167,7 @@ export class TemplateEditor {
     this.context.lineWidth = Math.max(3, this.canvas.width / 360);
     this.context.fillStyle = 'rgba(255,255,255,.86)';
     this.context.strokeRect(box.x, box.y, box.width, box.height);
-    this.context.fillRect(box.x, Math.max(0, box.y - 30), Math.max(58, label.length * 18), 28);
+    this.context.fillRect(box.x, Math.max(0, box.y - 30), Math.max(72, label.length * 16), 28);
     this.context.fillStyle = color;
     this.context.font = `${Math.max(18, this.canvas.width / 42)}px sans-serif`;
     this.context.fillText(label, box.x + 8, Math.max(22, box.y - 9));
