@@ -427,7 +427,7 @@ async function runOcr() {
     const boxes = state.boxes.slice().filter(box => box.number <= test.questionCount).sort((a, b) => a.number - b.number);
     for (let index = 0; index < boxes.length; index += 1) {
       const box = boxes[index];
-      const crop = cropByRatio(state.adjustedCanvas, box);
+      const crop = cropByRatio(state.adjustedCanvas, box, 0.03);
       const result = await ocrEngine.recognizeAnswerImage(crop, {
         onProgress: progress => {
           elements.ocrProgressText.textContent = `問${box.number}を読み取り中: ${progress.progress}%`;
@@ -452,7 +452,7 @@ async function runOcr() {
 function renderCropCard(item) {
   const card = document.createElement('div');
   card.className = 'crop-card';
-  card.innerHTML = `<strong>問${item.number}</strong><p>${escapeHtml(item.answer || '未回答')} / ${Math.round(item.confidence)}%</p>`;
+  card.innerHTML = `<strong>問${item.number}</strong><p>${escapeHtml(item.answer || '未回答')} / ${Math.round(item.confidence)}% / ${escapeHtml(item.variantName || '')}</p>`;
   const image = new Image();
   image.onload = () => {
     const canvas = document.createElement('canvas');
@@ -507,7 +507,10 @@ function renderReviewCard(item) {
         <span>確信度: ${Math.round(item.ocrConfidence)}%</span>
         <span>正答: ${escapeHtml(item.correct)}</span>
         <span>${item.isCorrect ? '正解' : item.isBlank ? '未回答' : '不正解'}</span>
+        <span>前処理: ${escapeHtml(ocr.variantName || '標準')}</span>
+        <span>黒画素: ${Math.round((ocr.inkRatio || 0) * 1000) / 10}%</span>
       </div>
+      ${ocr.processedDataUrl ? `<img src="${ocr.processedDataUrl}" alt="問${item.number}のOCR用補正画像" style="width:100%;border:1px solid #d8d1c4;border-radius:6px;background:#fff;margin-top:8px;">` : ''}
       <div class="manual-choice">${choices}</div>
     </article>
   `;

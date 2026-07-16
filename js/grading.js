@@ -56,10 +56,13 @@ export function normalizeChoice(value) {
   const text = String(value || '')
     .trim()
     .toLowerCase()
-    .replace(/[Ａ-Ｚａ-ｚ]/g, char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
-    .replace(/[ⓐⒶ]/g, 'a')
-    .replace(/[ⓑⒷ]/g, 'b')
-    .replace(/[ⓒⒸ]/g, 'c')
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+    .replace(/[ⓐⒶ①]/g, 'a')
+    .replace(/[ⓑⒷ②]/g, 'b')
+    .replace(/[ⓒⒸ③]/g, 'c')
+    .replace(/[4@]/g, 'a')
+    .replace(/[68]/g, 'b')
+    .replace(/[(<]/g, 'c')
     .replace(/[^abc]/g, '');
 
   if (!text) return '';
