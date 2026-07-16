@@ -125,6 +125,8 @@ input[type="date"],
 select,
 input[type="file"] {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 48px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -250,7 +252,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 }
 
 .actions.compact {
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
 }
 
 .image-pickers {
@@ -296,7 +298,7 @@ canvas {
 .template-toolbar,
 .filters {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   margin-top: 12px;
 }
@@ -373,12 +375,74 @@ canvas {
 
 .control-grid label,
 .filters label {
+  min-width: 0;
   margin: 0;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--soft);
   color: var(--text);
+}
+
+.filters label {
+  display: grid;
+  gap: 6px;
+}
+
+.history-list {
+  margin-top: 12px;
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "date score"
+    "title score"
+    "student score";
+  align-items: center;
+  gap: 4px 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.history-date {
+  grid-area: date;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.history-title {
+  grid-area: title;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.history-student {
+  grid-area: student;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.history-score {
+  grid-area: score;
+  min-width: 64px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--primary);
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
 }
 
 input[type="range"] {
@@ -461,7 +525,20 @@ progress {
   .steps { grid-template-columns: repeat(6, 1fr); }
   .image-pickers { grid-template-columns: 1fr 1fr; }
   .template-tools { grid-template-columns: 1fr 1.4fr; }
+  .control-grid,
+  .template-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .filters {
+    grid-template-columns: 1fr 1fr 1.4fr;
+  }
   .crop-grid { grid-template-columns: repeat(4, 1fr); }
   .review-list { grid-template-columns: repeat(2, 1fr); }
   .actions.compact { grid-template-columns: repeat(4, 1fr); }
+}
+
+@media (min-width: 520px) and (max-width: 719px) {
+  .actions.compact {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

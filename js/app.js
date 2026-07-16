@@ -125,6 +125,9 @@ function bindEvents() {
   document.querySelector('#exportFilteredCsvButton').addEventListener('click', exportFilteredCsv);
   document.querySelector('#backupButton').addEventListener('click', backupJson);
   elements.restoreInput.addEventListener('change', restoreJson);
+  [elements.fromDate, elements.toDate, elements.historyTestSelect].forEach(input => {
+    input.addEventListener('change', renderHistory);
+  });
 }
 
 async function loadTests() {
@@ -545,11 +548,12 @@ async function saveCurrentResult() {
 async function renderHistory() {
   const results = await getFilteredResults();
   elements.historyList.innerHTML = results.map(result => `
-    <div class="history-row">
-      <strong>${escapeHtml(formatDateTime(result.gradedAt))}</strong>
-      <span>${escapeHtml(result.testName)} / ${escapeHtml(result.studentId || '識別番号なし')}</span>
-      <span>${result.totalScore}/${result.maxScore}</span>
-    </div>
+    <article class="history-row">
+      <time class="history-date">${escapeHtml(formatDateTime(result.gradedAt))}</time>
+      <div class="history-title">${escapeHtml(result.testName)}</div>
+      <div class="history-student">識別番号: ${escapeHtml(result.studentId || 'なし')}</div>
+      <div class="history-score">${result.totalScore}/${result.maxScore}</div>
+    </article>
   `).join('') || '<p class="subtext">保存済みの結果はありません。</p>';
 }
 
