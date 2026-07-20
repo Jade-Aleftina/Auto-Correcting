@@ -2,6 +2,7 @@ import { TesseractOcrEngine } from './ocr.js';
 import { PaddleOcrEngine } from './engines/PaddleOcrEngine.js';
 import { RuleBasedGradingEngine, normalizeChoice } from './grading.js';
 import { TemplateEditor } from './templateEditor.js';
+import { detectAnswerBoxesFromLines } from './answerBoxDetector.js';
 import { applyAdjustments, copyCanvas, cropByRatio, detectBlur, drawImageToCanvas, loadImageFromFile, rotateCanvas } from './imageProcessor.js';
 import { createId, exportAllData, getAll, getItem, importAllData, putItem } from './storage.js';
 import { downloadCsv, downloadJson, resultToCsvRows, formatDateTime } from './export.js';
@@ -31,14 +32,26 @@ const elements = {
   contrast: document.querySelector('#contrast'),
   threshold: document.querySelector('#threshold'),
   activeQuestion: document.querySelector('#activeQuestion'),
+  anchorModeButton: document.querySelector('#anchorModeButton'),
+  pointModeButton: document.querySelector('#pointModeButton'),
   areaModeButton: document.querySelector('#areaModeButton'),
   singleModeButton: document.querySelector('#singleModeButton'),
+  anchorPanel: document.querySelector('#anchorPanel'),
+  anchorStatus: document.querySelector('#anchorStatus'),
+  resetAnchorsButton: document.querySelector('#resetAnchorsButton'),
+  pointPanel: document.querySelector('#pointPanel'),
   areaPanel: document.querySelector('#areaPanel'),
+  pointWidth: document.querySelector('#pointWidth'),
+  pointHeight: document.querySelector('#pointHeight'),
+  pointAutoNext: document.querySelector('#pointAutoNext'),
   areaStart: document.querySelector('#areaStart'),
   areaCount: document.querySelector('#areaCount'),
   areaColumns: document.querySelector('#areaColumns'),
   areaPadding: document.querySelector('#areaPadding'),
   areaOrder: document.querySelector('#areaOrder'),
+  detectBoxesButton: document.querySelector('#detectBoxesButton'),
+  detectBoxesInAreaButton: document.querySelector('#detectBoxesInAreaButton'),
+  autoDetectStatus: document.querySelector('#autoDetectStatus'),
   boxProgress: document.querySelector('#boxProgress'),
   boxList: document.querySelector('#boxList'),
   ocrProgress: document.querySelector('#ocrProgress'),
@@ -79,6 +92,10 @@ async function init() {
     state.boxes = boxes;
     renderBoxList();
   };
+  state.templateEditor.onActiveNumberChange = number => {
+    elements.activeQuestion.value = String(number);
+  };
+  state.templateEditor.onAnchorProgressChange = renderAnchorStatus;
 
   bindEvents();
   await loadTests();
@@ -116,16 +133,25 @@ function bindEvents() {
   [elements.brightness, elements.contrast, elements.threshold].forEach(input => {
     input.addEventListener('input', refreshAdjustedImage);
   });
+  elements.anchorModeButton.addEventListener('click', () => setTemplateMode('anchor'));
+  elements.pointModeButton.addEventListener('click', () => setTemplateMode('point'));
   elements.areaModeButton.addEventListener('click', () => setTemplateMode('area'));
   elements.singleModeButton.addEventListener('click', () => setTemplateMode('single'));
   elements.activeQuestion.addEventListener('change', () => {
     state.templateEditor.setActiveNumber(Number(elements.activeQuestion.value));
+  });
+  [elements.pointWidth, elements.pointHeight, elements.pointAutoNext].forEach(input => {
+    input.addEventListener('input', syncPointOptionsFromUi);
+    input.addEventListener('change', syncPointOptionsFromUi);
   });
   [elements.areaStart, elements.areaCount, elements.areaColumns, elements.areaPadding, elements.areaOrder].forEach(input => {
     input.addEventListener('input', syncAreaOptionsFromUi);
     input.addEventListener('change', syncAreaOptionsFromUi);
   });
   document.querySelector('#loadTemplateButton').addEventListener('click', loadTemplateForCurrentTest);
+  elements.resetAnchorsButton.addEventListener('click', () => state.templateEditor.resetAnchors());
+  elements.detectBoxesButton.addEventListener('click', () => detectBoxesFromFrameLines());
+  elements.detectBoxesInAreaButton.addEventListener('click', () => detectBoxesFromFrameLines({ useManualArea: true }));
   document.querySelector('#clearBoxesButton').addEventListener('click', () => state.templateEditor.clear());
   document.querySelector('#saveTemplateButton').addEventListener('click', saveTemplate);
   document.querySelector('#startOcrButton').addEventListener('click', runOcr);
@@ -319,6 +345,7 @@ function renderQuestionSelectors() {
   elements.areaCount.value = String(count);
   state.templateEditor.setQuestionCount(count);
   state.templateEditor.setActiveNumber(Number(elements.activeQuestion.value || 1));
+  syncPointOptionsFromUi();
   syncAreaOptionsFromUi();
   renderBoxList();
 }
@@ -377,12 +404,35 @@ function getImageSettings() {
 }
 
 function setTemplateMode(mode) {
-  const isArea = mode !== 'single';
-  state.templateEditor.setMode(isArea ? 'area' : 'single');
+  const selectedMode = ['anchor', 'point', 'area', 'single'].includes(mode) ? mode : 'anchor';
+  const isAnchor = selectedMode === 'anchor';
+  const isPoint = selectedMode === 'point';
+  const isArea = selectedMode === 'area';
+  const isSingle = selectedMode === 'single';
+  state.templateEditor.setMode(selectedMode);
+  elements.anchorModeButton.classList.toggle('is-selected', isAnchor);
+  elements.pointModeButton.classList.toggle('is-selected', isPoint);
   elements.areaModeButton.classList.toggle('is-selected', isArea);
-  elements.singleModeButton.classList.toggle('is-selected', !isArea);
-  elements.areaPanel.classList.toggle('hidden', !isArea);
-  showMessage(isArea ? '回答が書かれている範囲全体を大きく囲んでください。' : '修正したい問題を選び、その問題の回答欄だけを囲んでください。');
+  elements.singleModeButton.classList.toggle('is-selected', isSingle);
+  elements.anchorPanel.classList.toggle('hidden', !isAnchor);
+  elements.pointPanel.classList.toggle('hidden', !(isAnchor || isPoint));
+  elements.areaPanel.classList.toggle('hidden', !(isAnchor || isArea));
+  const messages = {
+    anchor: '各列の一番上と一番下の回答文字だけをタップしてください。間の問題は自動配置します。',
+    point: '回答文字の中心をタップしてください。タップ後は次の問題へ進みます。',
+    area: '回答が書かれている範囲全体を大きく囲んでください。',
+    single: '修正したい問題を選び、その問題の回答欄だけを囲んでください。'
+  };
+  showMessage(messages[selectedMode]);
+  renderAnchorStatus(state.templateEditor.getAnchorStatus());
+}
+
+function syncPointOptionsFromUi() {
+  state.templateEditor.setPointOptions({
+    widthPercent: Number(elements.pointWidth.value || 7),
+    heightPercent: Number(elements.pointHeight.value || 3.5),
+    autoNext: elements.pointAutoNext.checked
+  });
 }
 
 function syncAreaOptionsFromUi() {
@@ -393,6 +443,15 @@ function syncAreaOptionsFromUi() {
     padding: Number(elements.areaPadding.value || 0),
     order: elements.areaOrder.value
   });
+  renderAnchorStatus(state.templateEditor.getAnchorStatus());
+}
+
+function renderAnchorStatus(status) {
+  if (!elements.anchorStatus || !status) return;
+  elements.anchorStatus.textContent = status.message;
+  elements.anchorStatus.className = status.completed >= status.total && status.total > 0
+    ? 'message ok'
+    : 'message';
 }
 
 async function saveTemplate() {
@@ -422,6 +481,97 @@ async function loadTemplateForCurrentTest() {
   } else {
     showMessage('このテストの保存済み回答範囲はありません。');
   }
+}
+
+async function detectBoxesFromFrameLines(options = {}) {
+  const useManualArea = Boolean(options.useManualArea);
+  const button = useManualArea ? elements.detectBoxesInAreaButton : elements.detectBoxesButton;
+  const originalText = button.textContent;
+  try {
+    const test = readTestForm();
+    if (!state.adjustedCanvas.width) {
+      showMessage('先に答案画像を選択してください。', 'error');
+      return;
+    }
+
+    const searchArea = useManualArea ? getManualSearchArea(test) : null;
+    if (useManualArea && !searchArea) {
+      const message = '先に「範囲をまとめて」で回答欄全体を大きく囲んでください。';
+      elements.autoDetectStatus.textContent = message;
+      elements.autoDetectStatus.className = 'message warn';
+      showMessage(message, 'error');
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = '検出中...';
+    elements.autoDetectStatus.textContent = useManualArea ? '指定した大枠内だけで枠線を検出しています。' : '画像全体から枠線を検出しています。';
+    elements.autoDetectStatus.className = 'message';
+
+    const result = detectAnswerBoxesFromLines(state.adjustedCanvas, {
+      start: Number(elements.areaStart.value || 1),
+      count: Math.min(Number(elements.areaCount.value || test.questionCount), test.questionCount),
+      columns: Number(elements.areaColumns.value || 1),
+      order: elements.areaOrder.value,
+      insetPercent: Number(elements.areaPadding.value || 10),
+      searchArea
+    });
+
+    if (!result.boxes.length) {
+      elements.autoDetectStatus.textContent = result.message;
+      elements.autoDetectStatus.className = 'message warn';
+      showMessage(result.message, 'error');
+      return;
+    }
+
+    const replaceNumbers = new Set(result.boxes.map(box => box.number));
+    const boxes = state.boxes.filter(box => !replaceNumbers.has(box.number)).concat(result.boxes);
+    state.templateEditor.setBoxes(boxes);
+    await saveDraft();
+
+    elements.autoDetectStatus.textContent =
+      `${result.message} 検出線: 横${result.horizontalLineCount} / 縦${result.verticalLineCount} / 候補${result.candidateCount}`;
+    elements.autoDetectStatus.className = 'message ok';
+    showMessage(useManualArea ? '指定した大枠内の枠線から回答欄候補を作成しました。' : '枠線から回答欄候補を作成しました。', 'ok');
+  } catch (error) {
+    const message = error.message || '枠線の自動検出に失敗しました。';
+    elements.autoDetectStatus.textContent = message;
+    elements.autoDetectStatus.className = 'message error';
+    showMessage(message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+function getManualSearchArea(test) {
+  const lastArea = state.templateEditor.getLastAreaBox?.();
+  if (lastArea) return expandRatioBox(lastArea, 0.015);
+
+  const start = Number(elements.areaStart.value || 1);
+  const count = Math.min(Number(elements.areaCount.value || test.questionCount), test.questionCount);
+  const end = start + count - 1;
+  const boxes = state.boxes.filter(box => box.number >= start && box.number <= end);
+  if (!boxes.length) return null;
+
+  const minX = Math.min(...boxes.map(box => box.x));
+  const minY = Math.min(...boxes.map(box => box.y));
+  const maxX = Math.max(...boxes.map(box => box.x + box.width));
+  const maxY = Math.max(...boxes.map(box => box.y + box.height));
+  return expandRatioBox({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, 0.035);
+}
+
+function expandRatioBox(box, amount) {
+  const x = Math.max(0, box.x - amount);
+  const y = Math.max(0, box.y - amount);
+  const right = Math.min(1, box.x + box.width + amount);
+  const bottom = Math.min(1, box.y + box.height + amount);
+  return {
+    x,
+    y,
+    width: Math.max(0.01, right - x),
+    height: Math.max(0.01, bottom - y)
+  };
 }
 
 function renderBoxList() {
@@ -454,7 +604,7 @@ function renderBoxList() {
       const number = Number(button.dataset.selectBox);
       elements.activeQuestion.value = String(number);
       state.templateEditor.setActiveNumber(number);
-      setTemplateMode('single');
+      setTemplateMode('point');
     });
   });
   elements.boxList.querySelectorAll('[data-remove-box]').forEach(button => {
@@ -495,7 +645,7 @@ async function runOcr() {
 
     const boxes = state.boxes.slice().filter(box => box.number <= test.questionCount).sort((a, b) => a.number - b.number);
     const crops = boxes.map(box => {
-      const crop = cropByRatio(state.adjustedCanvas, box, 0.03);
+      const crop = cropByRatio(state.adjustedCanvas, box, 0);
       return { number: box.number, canvas: crop, cropDataUrl: crop.toDataURL('image/png') };
     });
 
@@ -747,7 +897,7 @@ function showStep(stepId) {
   elements.steps.forEach(step => step.classList.toggle('is-active', step.dataset.stepTarget === stepId));
   if (stepId === 'template') {
     renderQuestionSelectors();
-    setTemplateMode('area');
+    setTemplateMode('anchor');
     if (state.adjustedCanvas.width) state.templateEditor.setImage(state.adjustedCanvas);
   }
   if (stepId === 'history') renderHistory();

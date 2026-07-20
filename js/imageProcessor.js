@@ -73,8 +73,8 @@ export function cropByRatio(source, boxRatio, paddingRatio = 0.12) {
   const padding = Math.max(width, height) * paddingRatio;
   const sx = Math.max(0, Math.round(x - padding));
   const sy = Math.max(0, Math.round(y - padding));
-  const sw = Math.min(source.width - sx, Math.round(width + padding * 2));
-  const sh = Math.min(source.height - sy, Math.round(height + padding * 2));
+  const sw = Math.max(8, Math.min(source.width - sx, Math.round(width + padding * 2)));
+  const sh = Math.max(8, Math.min(source.height - sy, Math.round(height + padding * 2)));
 
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(80, sw * 3);

@@ -122,6 +122,8 @@ button {
 input[type="text"],
 input[type="number"],
 input[type="date"],
+input[type="url"],
+input[type="password"],
 select,
 input[type="file"] {
   width: 100%;
@@ -335,7 +337,7 @@ canvas {
 
 .segmented {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
   margin-top: 10px;
 }
@@ -360,6 +362,19 @@ canvas {
 
 .mini-grid label {
   margin: 0;
+}
+
+#pointPanel .check-row {
+  margin-top: 10px;
+}
+
+#anchorPanel .message {
+  margin-bottom: 10px;
+}
+
+#autoDetectStatus {
+  margin-top: 10px;
+  font-size: 13px;
 }
 
 .box-row {
@@ -534,7 +549,12 @@ progress {
 @media (min-width: 720px) {
   .steps { grid-template-columns: repeat(6, 1fr); }
   .image-pickers { grid-template-columns: 1fr 1fr; }
-  .template-tools { grid-template-columns: 1fr 1.4fr; }
+  .template-tools {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .segmented {
+    grid-template-columns: repeat(4, 1fr);
+  }
   .control-grid,
   .template-toolbar {
     grid-template-columns: 1fr 1fr;
@@ -548,7 +568,17 @@ progress {
 }
 
 @media (min-width: 520px) and (max-width: 719px) {
+  .segmented {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .actions.compact {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 420px) {
+  .segmented {
     grid-template-columns: repeat(2, 1fr);
   }
 }
