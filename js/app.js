@@ -1,4 +1,5 @@
 import { TesseractOcrEngine } from './ocr.js';
+import { PaddleOcrEngine } from './engines/PaddleOcrEngine.js';
 import { RuleBasedGradingEngine, normalizeChoice } from './grading.js';
 import { TemplateEditor } from './templateEditor.js';
 import { applyAdjustments, copyCanvas, cropByRatio, detectBlur, drawImageToCanvas, loadImageFromFile, rotateCanvas } from './imageProcessor.js';
@@ -15,6 +16,12 @@ const elements = {
   questionCount: document.querySelector('#questionCount'),
   answerKey: document.querySelector('#answerKey'),
   saveImages: document.querySelector('#saveImages'),
+  ocrMode: document.querySelector('#ocrMode'),
+  ocrServerUrl: document.querySelector('#ocrServerUrl'),
+  ocrDeviceToken: document.querySelector('#ocrDeviceToken'),
+  saveOcrSettingsButton: document.querySelector('#saveOcrSettingsButton'),
+  testOcrServerButton: document.querySelector('#testOcrServerButton'),
+  ocrServerStatus: document.querySelector('#ocrServerStatus'),
   cameraInput: document.querySelector('#cameraInput'),
   fileInput: document.querySelector('#fileInput'),
   mainCanvas: document.querySelector('#mainCanvas'),
@@ -60,7 +67,8 @@ const state = {
   currentSavedResult: null
 };
 
-const ocrEngine = new TesseractOcrEngine();
+const tesseractEngine = new TesseractOcrEngine();
+const paddleEngine = new PaddleOcrEngine(getOcrSettings);
 const gradingEngine = new RuleBasedGradingEngine();
 
 window.addEventListener('load', init);
@@ -74,6 +82,7 @@ async function init() {
 
   bindEvents();
   await loadTests();
+  loadOcrSettings();
   await restoreDraft();
   renderAnswerKey();
   renderQuestionSelectors();
@@ -93,6 +102,8 @@ function bindEvents() {
 
   document.querySelector('#newTestButton').addEventListener('click', newTest);
   document.querySelector('#saveTestButton').addEventListener('click', saveTest);
+  elements.saveOcrSettingsButton.addEventListener('click', saveOcrSettings);
+  elements.testOcrServerButton.addEventListener('click', testOcrServer);
   elements.testSelect.addEventListener('change', selectTest);
   elements.questionCount.addEventListener('change', () => {
     renderAnswerKey();
@@ -105,7 +116,6 @@ function bindEvents() {
   [elements.brightness, elements.contrast, elements.threshold].forEach(input => {
     input.addEventListener('input', refreshAdjustedImage);
   });
-
   elements.areaModeButton.addEventListener('click', () => setTemplateMode('area'));
   elements.singleModeButton.addEventListener('click', () => setTemplateMode('single'));
   elements.activeQuestion.addEventListener('change', () => {
@@ -115,7 +125,6 @@ function bindEvents() {
     input.addEventListener('input', syncAreaOptionsFromUi);
     input.addEventListener('change', syncAreaOptionsFromUi);
   });
-
   document.querySelector('#loadTemplateButton').addEventListener('click', loadTemplateForCurrentTest);
   document.querySelector('#clearBoxesButton').addEventListener('click', () => state.templateEditor.clear());
   document.querySelector('#saveTemplateButton').addEventListener('click', saveTemplate);
@@ -128,6 +137,66 @@ function bindEvents() {
   [elements.fromDate, elements.toDate, elements.historyTestSelect].forEach(input => {
     input.addEventListener('change', renderHistory);
   });
+}
+
+function loadOcrSettings() {
+  const settings = getOcrSettings();
+  elements.ocrMode.value = settings.mode;
+  elements.ocrServerUrl.value = settings.serverUrl;
+  elements.ocrDeviceToken.value = settings.deviceToken;
+}
+
+function getOcrSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('free-ocr-grader-ocr-settings') || '{}');
+    return {
+      mode: saved.mode || 'paddle',
+      serverUrl: saved.serverUrl || '',
+      deviceToken: saved.deviceToken || ''
+    };
+  } catch (_error) {
+    return { mode: 'paddle', serverUrl: '', deviceToken: '' };
+  }
+}
+
+function saveOcrSettings() {
+  const settings = {
+    mode: elements.ocrMode.value,
+    serverUrl: elements.ocrServerUrl.value.trim().replace(/\/+$/, ''),
+    deviceToken: elements.ocrDeviceToken.value.trim()
+  };
+  localStorage.setItem('free-ocr-grader-ocr-settings', JSON.stringify(settings));
+  setOcrServerStatus('OCR設定をこの端末に保存しました。公開コードには保存されません。', 'ok');
+}
+
+async function testOcrServer() {
+  saveOcrSettings();
+  const originalText = elements.testOcrServerButton.textContent;
+  try {
+    elements.testOcrServerButton.disabled = true;
+    elements.testOcrServerButton.textContent = '接続中...';
+    setOcrServerStatus('採点サーバーへ接続しています。');
+    showMessage('採点サーバーへ接続しています。');
+    const health = await paddleEngine.healthCheck();
+    const message = health.ready
+      ? 'PaddleOCRサーバーに接続できました。'
+      : 'サーバーには接続できましたが、PaddleOCRの準備が完了していません。';
+    const type = health.ready ? 'ok' : 'error';
+    setOcrServerStatus(message, type);
+    showMessage(message, type);
+  } catch (error) {
+    const message = error.message || '採点サーバーに接続できませんでした。';
+    setOcrServerStatus(message, 'error');
+    showMessage(message, 'error');
+  } finally {
+    elements.testOcrServerButton.disabled = false;
+    elements.testOcrServerButton.textContent = originalText;
+  }
+}
+
+function setOcrServerStatus(message, type = '') {
+  elements.ocrServerStatus.textContent = message;
+  elements.ocrServerStatus.className = `message ${type}`.trim();
 }
 
 async function loadTests() {
@@ -273,7 +342,7 @@ async function handleImageInput(event) {
     refreshAdjustedImage();
     state.templateEditor.setImage(state.adjustedCanvas);
     await saveDraft();
-    showMessage('答案画像を読み込みました。撮影済み画像でもこのまま使えます。', 'ok');
+    showMessage('答案画像を読み込みました。', 'ok');
   } catch (error) {
     showMessage(error.message, 'error');
   } finally {
@@ -418,31 +487,20 @@ async function runOcr() {
       return;
     }
 
+    saveOcrSettings();
     showStep('ocr');
     elements.ocrProgress.value = 0;
     elements.cropPreview.innerHTML = '';
     state.ocrItems = [];
 
-    await ocrEngine.initialize(progress => {
-      elements.ocrProgressText.textContent = `OCR準備中: ${progress.status} ${progress.progress}%`;
+    const boxes = state.boxes.slice().filter(box => box.number <= test.questionCount).sort((a, b) => a.number - b.number);
+    const crops = boxes.map(box => {
+      const crop = cropByRatio(state.adjustedCanvas, box, 0.03);
+      return { number: box.number, canvas: crop, cropDataUrl: crop.toDataURL('image/png') };
     });
 
-    const boxes = state.boxes.slice().filter(box => box.number <= test.questionCount).sort((a, b) => a.number - b.number);
-    for (let index = 0; index < boxes.length; index += 1) {
-      const box = boxes[index];
-      const crop = cropByRatio(state.adjustedCanvas, box, 0.03);
-      const result = await ocrEngine.recognizeAnswerImage(crop, {
-        onProgress: progress => {
-          elements.ocrProgressText.textContent = `問${box.number}を読み取り中: ${progress.progress}%`;
-        }
-      });
-      const item = { number: box.number, cropDataUrl: crop.toDataURL('image/png'), ...result };
-      state.ocrItems.push(item);
-      renderCropCard(item);
-      elements.ocrProgress.value = Math.round(((index + 1) / boxes.length) * 100);
-      await saveDraft();
-    }
-
+    state.ocrItems = await recognizeCrops(crops);
+    state.ocrItems.forEach(renderCropCard);
     state.finalAnswers = Object.fromEntries(state.ocrItems.map(item => [item.number, item.answer || '']));
     gradeAndRender();
     showMessage('OCRが完了しました。確認画面で結果を確認してください。', 'ok');
@@ -452,10 +510,64 @@ async function runOcr() {
   }
 }
 
+async function recognizeCrops(crops) {
+  const settings = getOcrSettings();
+  if (settings.mode === 'tesseract') {
+    return recognizeWithTesseract(crops);
+  }
+  if (settings.mode === 'compare') {
+    const [paddleItems, tesseractItems] = await Promise.all([
+      recognizeWithPaddle(crops),
+      recognizeWithTesseract(crops)
+    ]);
+    return paddleItems.map(item => ({
+      ...item,
+      tesseractComparison: tesseractItems.find(other => other.number === item.number)
+    }));
+  }
+  return recognizeWithPaddle(crops);
+}
+
+async function recognizeWithPaddle(crops) {
+  elements.ocrProgressText.textContent = 'PaddleOCRサーバーへ送信しています。';
+  const results = await paddleEngine.recognizeAnswerImages(crops, {
+    onProgress: progress => {
+      elements.ocrProgressText.textContent = `${progress.status}: ${progress.progress}%`;
+    }
+  });
+  elements.ocrProgress.value = 100;
+  return results.map(result => ({
+    ...result,
+    number: result.number,
+    cropDataUrl: crops.find(crop => crop.number === result.number)?.cropDataUrl || '',
+    engine: 'paddle'
+  }));
+}
+
+async function recognizeWithTesseract(crops) {
+  await tesseractEngine.initialize(progress => {
+    elements.ocrProgressText.textContent = `Tesseract準備中: ${progress.status} ${progress.progress}%`;
+  });
+
+  const results = [];
+  for (let index = 0; index < crops.length; index += 1) {
+    const crop = crops[index];
+    const result = await tesseractEngine.recognizeAnswerImage(crop.canvas, {
+      onProgress: progress => {
+        elements.ocrProgressText.textContent = `問${crop.number}をTesseractで読み取り中: ${progress.progress}%`;
+      }
+    });
+    results.push({ number: crop.number, cropDataUrl: crop.cropDataUrl, engine: 'tesseract', ...result });
+    elements.ocrProgress.value = Math.round(((index + 1) / crops.length) * 100);
+    await saveDraft();
+  }
+  return results;
+}
+
 function renderCropCard(item) {
   const card = document.createElement('div');
   card.className = 'crop-card';
-  card.innerHTML = `<strong>問${item.number}</strong><p>${escapeHtml(item.answer || '未回答')} / ${Math.round(item.confidence)}% / ${escapeHtml(item.variantName || '')}</p>`;
+  card.innerHTML = `<strong>問${item.number}</strong><p>${escapeHtml(item.answer || '未回答')} / ${Math.round(item.confidence)}% / ${escapeHtml(item.variantName || item.engine || '')}</p>`;
   const image = new Image();
   image.onload = () => {
     const canvas = document.createElement('canvas');
@@ -501,17 +613,22 @@ function renderReviewCard(item) {
     const label = choice || '未回答';
     return `<button type="button" class="${item.finalAnswer === choice ? 'is-selected' : ''}" data-number="${item.number}" data-manual-answer="${choice}">${label}</button>`;
   }).join('');
+  const compare = ocr.tesseractComparison
+    ? `<span>Tesseract: ${escapeHtml(ocr.tesseractComparison.answer || '未回答')} / ${Math.round(ocr.tesseractComparison.confidence)}%</span>`
+    : '';
+  const warnings = (ocr.warnings || []).length ? `<span>警告: ${escapeHtml(ocr.warnings.join('、'))}</span>` : '';
   return `
     <article class="review-card ${needsReview(item) ? 'needs-review' : ''}">
       <strong>問${item.number}</strong>
       <img src="${ocr.cropDataUrl || ''}" alt="問${item.number}の回答欄" style="width:100%;border:1px solid #d8d1c4;border-radius:6px;background:#fff;margin-top:8px;">
       <div class="review-meta">
         <span>OCR: ${escapeHtml(item.ocrAnswer || '未回答')}</span>
-        <span>確信度: ${Math.round(item.ocrConfidence)}%</span>
+        <span>信頼度: ${Math.round(item.ocrConfidence)}%</span>
         <span>正答: ${escapeHtml(item.correct)}</span>
         <span>${item.isCorrect ? '正解' : item.isBlank ? '未回答' : '不正解'}</span>
-        <span>前処理: ${escapeHtml(ocr.variantName || '標準')}</span>
-        <span>黒画素: ${Math.round((ocr.inkRatio || 0) * 1000) / 10}%</span>
+        <span>エンジン: ${escapeHtml(ocr.variantName || ocr.engine || '標準')}</span>
+        ${compare}
+        ${warnings}
       </div>
       ${ocr.processedDataUrl ? `<img src="${ocr.processedDataUrl}" alt="問${item.number}のOCR用補正画像" style="width:100%;border:1px solid #d8d1c4;border-radius:6px;background:#fff;margin-top:8px;">` : ''}
       <div class="manual-choice">${choices}</div>
@@ -520,7 +637,7 @@ function renderReviewCard(item) {
 }
 
 function needsReview(item) {
-  return item.ocrConfidence < 72 || ['blank', 'multiple', 'invalid', 'low-confidence'].includes(item.status);
+  return item.ocrConfidence < 72 || ['blank', 'multiple', 'invalid', 'low-confidence', 'unreadable'].includes(item.status);
 }
 
 async function saveCurrentResult() {
@@ -535,6 +652,7 @@ async function saveCurrentResult() {
     testName: state.currentTest.name,
     studentId: elements.studentId.value.trim(),
     imageDataUrl: state.currentTest.saveImages ? state.adjustedCanvas.toDataURL('image/jpeg', 0.8) : '',
+    ocrItems: state.ocrItems.map(({ cropDataUrl, processedDataUrl, ...item }) => item),
     ...state.currentGrade
   };
   await putItem('results', result);

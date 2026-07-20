@@ -42,6 +42,24 @@
         <input id="saveImages" type="checkbox">
         <span>答案画像を端末内に保存する</span>
       </label>
+      <div class="tool-panel ocr-settings">
+        <h3>OCR設定</h3>
+        <label for="ocrMode">OCRエンジン</label>
+        <select id="ocrMode">
+          <option value="paddle">PaddleOCRを使う</option>
+          <option value="compare">PaddleOCRとTesseractを比較</option>
+          <option value="tesseract">Tesseract.jsのみ</option>
+        </select>
+        <label for="ocrServerUrl">PaddleOCRサーバーURL</label>
+        <input id="ocrServerUrl" type="url" inputmode="url" placeholder="https://example.trycloudflare.com">
+        <label for="ocrDeviceToken">端末トークン</label>
+        <input id="ocrDeviceToken" type="password" autocomplete="off" placeholder="サーバー側のSECRET_TOKEN">
+        <div class="actions compact">
+          <button id="saveOcrSettingsButton" type="button">OCR設定を保存</button>
+          <button id="testOcrServerButton" class="secondary" type="button">接続確認</button>
+        </div>
+        <div id="ocrServerStatus" class="message">PaddleOCRを使う場合は、サーバーURLを入力してください。</div>
+      </div>
       <div class="actions">
         <button id="saveTestButton" type="button">設定を保存</button>
         <button class="secondary next" type="button" data-next="image">次へ</button>

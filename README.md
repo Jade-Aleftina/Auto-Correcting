@@ -1,8 +1,10 @@
 # 英語3択 自動採点Webアプリ
 
-スマートフォンで撮影した答案画像から、手書きの `a`、`b`、`c` を Tesseract.js で読み取り、登録済みの正答と比較して採点する静的Webアプリです。
+スマートフォンで撮影した答案画像から、手書きの `a`、`b`、`c` を読み取り、登録済みの正答と比較して採点するWebアプリです。
 
-OpenAI API、Google Cloud Vision、有料OCR API、APIキーは使いません。画像処理とOCRは利用者のブラウザ内で行い、答案画像を外部OCRサービスへ送信しません。
+既存のTesseract.js版を維持しつつ、精度改善のためにPython/FastAPI/PaddleOCRサーバーを呼び出せる構成を追加しました。OpenAI API、Google Cloud Vision、有料OCR APIは使いません。
+
+通常はPaddleOCRサーバーを優先し、比較期間中はTesseract.jsとの結果比較もできます。
 
 ## 目的
 
@@ -24,7 +26,9 @@ js/storage.js
 js/export.js
 js/templateEditor.js
 js/engines/OcrEngine.js
+js/engines/PaddleOcrEngine.js
 js/engines/GradingEngine.js
+server/
 tests/manual-test-plan.md
 README.md
 ```
@@ -34,12 +38,50 @@ README.md
 OCR処理と採点処理は分離しています。
 
 - `js/ocr.js`: Tesseract.jsを使い、切り出した回答欄画像から回答候補・確信度・確認要否を返します。
+- `js/engines/PaddleOcrEngine.js`: FastAPI/PaddleOCRサーバーを呼び出し、Tesseract.jsと同じ形式の結果へ変換します。
 - `js/grading.js`: OCR結果や手動修正後の回答を、正答・配点と照合して点数を計算します。
 - `js/imageProcessor.js`: OCR前の画像補正、枠線除去、文字の中央寄せ、複数しきい値の前処理を行います。
 - `js/engines/OcrEngine.js`: OCRエンジン差し替え用の共通インターフェースです。
 - `js/engines/GradingEngine.js`: 採点エンジン差し替え用の共通インターフェースです。
+- `server/`: PaddleOCRを実行するPython/FastAPIサーバーです。
 
 将来AI採点へ置き換える場合は、`GradingEngine` と同じ `grade(test, answers, ocrItems)` を持つ新しいエンジンを追加し、`app.js` の生成箇所を差し替えます。OCRも同様に `OcrEngine` の `recognizeAnswerImage(canvas, options)` を実装すれば置き換えられます。
+
+## 既存Tesseract版からの変更点
+
+- Tesseract.jsは削除せず、引き続きブラウザ内OCRとして使えます。
+- `PaddleOCRを使う`、`PaddleOCRとTesseractを比較`、`Tesseract.jsのみ` を画面で選べます。
+- PaddleOCRサーバーURLと端末トークンは、利用端末のブラウザ内にだけ保存します。
+- 公開コードにはサーバーURL、トークン、Cloudflareの秘密情報を含めません。
+- PaddleOCRサーバー停止中は、接続確認やOCR実行時に分かりやすい日本語メッセージを表示します。
+
+## Pythonサーバーの起動方法
+
+PaddleOCRを使う場合だけ必要です。Tesseract.jsのみで使う場合、この手順は不要です。
+
+1. `server/.env.example` を `server/.env` にコピーします。
+2. `server/.env` の `SECRET_TOKEN` を自分だけが知る値に変更します。
+3. `ALLOWED_ORIGINS` にGitHub PagesのURLを設定します。
+4. PowerShellで `server/run-dev.ps1` を実行します。
+5. 起動後、フロントエンドの「OCR設定」でサーバーURLと端末トークンを入力し、「接続確認」を押します。
+
+Cloudflare Tunnelを使う場合は、Cloudflare側のトークンや認証情報をGitに入れないでください。Tunnelで発行されたHTTPS URLは、必要に応じて利用端末の設定欄へ入力してください。
+
+## 公開してはいけないファイル
+
+次はGitHubへアップロードしないでください。
+
+- `server/.env`
+- `server/tmp/`
+- `server/data/`
+- `server/logs/`
+- `server/.venv/`
+- Cloudflareの認証ファイル
+- 実際の答案画像
+- 採点結果データベース
+- 実際のサーバーURLや端末トークンを書いたメモ
+
+`.gitignore` と `server/.gitignore` に、これらを除外する設定を入れています。
 
 ## 起動方法
 

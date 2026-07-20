@@ -323,6 +323,16 @@ canvas {
   letter-spacing: 0;
 }
 
+.ocr-settings {
+  margin-top: 14px;
+}
+
+.ocr-settings .message {
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
